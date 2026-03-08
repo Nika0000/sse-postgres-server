@@ -1,0 +1,40 @@
+{
+    "name": "sse-postgres-server",
+    "build": {
+        "dockerfile": "Dockerfile",
+        "context": "."
+    },
+    "workspaceFolder": "/workspace",
+    "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=cached",
+    "features": {
+        "ghcr.io/devcontainers/features/common-utils:2": {
+            "installZsh": false,
+            "installOhMyZsh": false,
+            "upgradePackages": true
+        }
+    },
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "oven.bun-vscode",
+                "esbenp.prettier-vscode"
+            ]
+        }
+    },
+    "postCreateCommand": "bash .devcontainer/post-create.sh",
+    "forwardPorts": [
+        5983
+    ],
+    "runArgs": [
+        "--name=sse-postgres-server",
+        "--network=dev-net",
+        "-p",
+        "5983:5983"
+    ],
+    "portsAttributes": {
+        "5983": {
+            "label": "SSE server"
+        }
+    },
+    "remoteUser": "vscode"
+}

@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Environment files — never bake secrets into the image
+.env
+.env.*
+!.env.example
+
+# Git
+.git/
+.gitignore
+
+# CI / editor
+.github/
+.devcontainer/
+.vscode/
+
+# Test artifacts
+coverage/
+
+# External reference project (not part of this app)
+stripe-sync-engine/
+
+# Misc
+*.md

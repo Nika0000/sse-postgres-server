@@ -1,0 +1,82 @@
+name: sse-postgres-server
+
+services:
+
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports:
+      - "${PORT:-3000}:3000"
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+
+      # Channel rules
+      # Controls who can subscribe to which channels.
+      # Rules are evaluated top-to-bottom; the first match wins.
+      #
+      # Available types:
+      #
+      #   exact        { "type": "exact",     "channel": "my_channel" }
+      #                  -> allow any authenticated user on this named channel
+      #
+      #   role_gate    { "type": "role_gate", "channel": "admin_feed", "role": "admin" }
+      #                  -> JWT role must equal the given value
+      #
+      #   meta_gate    { "type": "meta_gate", "channel": "beta",  "key": "beta",  "value": true }
+      #   meta_gate    { "type": "meta_gate", "channel": "pro",   "key": "plan",  "value": "pro" }
+      #                  -> app_metadata[key] must equal value
+      #
+      #   team_prefix    { "type": "team_prefix"    }  ->  team_{id}   requires app_metadata.team_id
+      #   plan_prefix    { "type": "plan_prefix"    }  ->  plan_{tier} tiered gate (free/starter/pro/enterprise)
+      #   user_prefix    { "type": "user_prefix"    }  ->  user_{uuid} owner-only
+      #   role_prefix    { "type": "role_prefix"    }  ->  role_{name} JWT role must match
+      #   org_prefix     { "type": "org_prefix"     }  ->  org_{id}    app_metadata.org_id must match
+      #   private_prefix { "type": "private_prefix" }  ->  private_*   any non-anon user
+      #
+      #   public         { "type": "public"         }  ->  allow everything that was not matched above
+      #   deny_unlisted  { "type": "deny_unlisted"  }  ->  deny  everything that was not matched above
+      #
+      # Edit the JSON array below to define your app's channels:
+      CHANNEL_RULES: |
+        [
+          { "type": "exact",     "channel": "announcements" },
+          { "type": "exact",     "channel": "global"        },
+          { "type": "exact",     "channel": "status"        },
+          { "type": "role_gate", "channel": "admin_events",   "role": "admin"      },
+          { "type": "meta_gate", "channel": "beta_features",  "key": "beta",  "value": true  },
+          { "type": "meta_gate", "channel": "pro_feed",       "key": "plan",  "value": "pro" },
+          { "type": "team_prefix"    },
+          { "type": "plan_prefix"    },
+          { "type": "user_prefix"    },
+          { "type": "role_prefix"    },
+          { "type": "org_prefix"     },
+          { "type": "private_prefix" },
+          { "type": "deny_unlisted"  }
+        ]
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_data:
