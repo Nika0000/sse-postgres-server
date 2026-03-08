@@ -1,6 +1,6 @@
 {
     "name": "sse-postgres-server",
-    "version": "2026.03.08.1203",
+    "version": "2026.03.08.1226",
     "private": true,
     "type": "module",
     "scripts": {
