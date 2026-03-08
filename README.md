@@ -43,15 +43,52 @@ curl -N "http://localhost:3000/events?channels=orders&token=<jwt>"
 # multiple channels in one connection
 curl -N "http://localhost:3000/events?channels=global,orders,user_<uuid>&token=<jwt>"
 
+# user sub-channels (session, payments, orders …)
+curl -N "http://localhost:3000/events?channels=user_<uuid>:session,user_<uuid>:payments&token=<jwt>"
+
+# wildcard — subscribes to the base channel, receives all sub-event types
+curl -N "http://localhost:3000/events?channels=user_<uuid>:*&token=<jwt>"
+
 # server-to-server — token via header
 curl -N -H "Authorization: Bearer <jwt>" "http://localhost:3000/events?channels=orders"
 
-# publish from postgres
-psql $DATABASE_URL -c "SELECT pg_notify('orders', '{\"id\":1}')"
+# publish from postgres — SSE event name IS the channel name
+psql $DATABASE_URL -c "SELECT pg_notify('orders', '{\"event\":\"created\",\"data\":{\"id\":1}}')"
 
 # health check
 curl http://localhost:3000/health
-# → {"ok":true,"clients":2,"channels":1}
+# -> {"ok":true,"clients":2,"channels":1}
+```
+
+### SSE wire format
+
+Each message arrives as an SSE event whose **`event:` field is the channel name**:
+
+```
+event: orders
+data: {"channel":"orders","payload":{"event":"created","data":{"id":1}},"timestamp":"2026-03-08T12:00:00.000Z"}
+
+event: connected
+data: {"id":"<client-uuid>","channels":["orders"],"userId":"<user-uuid>"}
+```
+
+```js
+const es = new EventSource('/events?channels=orders,user_<uuid>:*&token=<jwt>')
+
+// named handler per channel
+es.addEventListener('orders', (e) => {
+  const { payload } = JSON.parse(e.data)
+  // payload = { event: 'created', data: { id: 1 } }
+})
+
+// wildcard: base channel name is the event label
+es.addEventListener(`user_${uid}`, (e) => {
+  const { payload } = JSON.parse(e.data)
+  switch (payload.event) {
+    case 'session_active':   ...; break
+    case 'payment_completed': ...; break
+  }
+})
 ```
 
 ## Channel rules
@@ -61,10 +98,14 @@ Rules run top-to-bottom — first match wins.
 | Pattern | Who can subscribe |
 |---|---|
 | `user_{uuid}` | The user whose UUID matches only |
+| `user_{uuid}:{subchannel}` | Same — sub-channel scoped to the same owner |
+| `user_{uuid}:*` | Wildcard — resolves to `user_{uuid}`, receives all notifications on it |
 | `role_{name}` | Users whose JWT `role` equals the suffix |
 | `org_{id}` | Users with `app_metadata.org_id === id` |
 | `private_*` | Any non-anonymous user |
 | everything else | Any authenticated user |
+
+> Channel names may contain letters, digits, underscores `_`, hyphens `-`, and colons `:`. They must start with a letter or underscore. Hyphens allow UUID-style names (`user_1b8f4c33-…`). Colons enable sub-channels and wildcards.
 
 ### Configure without rebuilding (`CHANNEL_RULES`)
 
@@ -77,6 +118,7 @@ CHANNEL_RULES='[
   { "type": "role_gate", "channel": "admin_events",  "role": "admin"      },
   { "type": "meta_gate", "channel": "beta",          "key": "beta",  "value": true  },
   { "type": "meta_gate", "channel": "pro_feed",      "key": "plan",  "value": "pro" },
+  { "type": "prefix_meta", "prefix": "lobby_", "key": "lobby_id" },
   { "type": "team_prefix"    },
   { "type": "user_prefix"    },
   { "type": "role_prefix"    },
@@ -91,9 +133,10 @@ CHANNEL_RULES='[
 | `exact` | Named channel, open to any authenticated user |
 | `role_gate` | Named channel, JWT role must match |
 | `meta_gate` | Named channel, `app_metadata[key] === value` |
+| `prefix_meta` | `{prefix}{id}` — `app_metadata[key]` must equal the suffix; works for any prefix with no code changes |
 | `team_prefix` | `team_{id}` — needs `app_metadata.team_id` |
-| `plan_prefix` | `plan_{tier}` — tiered gate (`free` → `starter` → `pro` → `enterprise`) |
-| `user_prefix` | `user_{uuid}` — owner-only |
+| `plan_prefix` | `plan_{tier}` — tiered gate (`free` -> `starter` -> `pro` -> `enterprise`) |
+| `user_prefix` | `user_{uuid}` — owner-only (also covers `user_{uuid}:{sub}` and `user_{uuid}:*`) |
 | `role_prefix` | `role_{name}` — JWT role must match suffix |
 | `org_prefix` | `org_{id}` — `app_metadata.org_id` must match |
 | `private_prefix` | `private_*` — any non-anon user |

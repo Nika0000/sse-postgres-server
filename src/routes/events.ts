@@ -1,6 +1,7 @@
 import type { Config } from '../config.ts'
 import { verifyJwt, extractToken } from '../auth.ts'
 import type { ChannelRuleEngine } from '../channels/rules.ts'
+import { resolveChannel } from '../channels/rules.ts'
 import {
     clientsById,
     connectionCountByUser,
@@ -85,6 +86,10 @@ export async function handleEvents(
         })
     }
 
+    // Resolve wildcard patterns (e.g. user_abc:* -> user_abc) for LISTEN.
+    // Dedup again in case two wildcards collapse to the same base channel.
+    const resolvedChannels = [...new Set(channels.map(resolveChannel))]
+
     // Connection caps
     if (clientsById.size >= config.maxTotalConnections) {
         return new Response('Service Unavailable — server at capacity', {
@@ -110,7 +115,7 @@ export async function handleEvents(
 
             const client: SseClient = {
                 id,
-                channels: new Set(channels),
+                channels: new Set(resolvedChannels),
                 user,
                 alive: true,
 
@@ -142,12 +147,12 @@ export async function handleEvents(
             // Start LISTEN on all channels; roll back on failure.
             try {
                 await Promise.all(
-                    channels.map((ch) => listenChannel(ch, config, onDead))
+                    resolvedChannels.map((ch) => listenChannel(ch, config, onDead))
                 )
             } catch (err) {
                 controller.error(err)
                 unregisterClient(client)
-                for (const ch of channels) {
+                for (const ch of resolvedChannels) {
                     clientsByChannel.get(ch)?.delete(client)
                 }
                 return
@@ -158,11 +163,11 @@ export async function handleEvents(
             client.send(
                 jsonLine('connected', {
                     id,
-                    channels,
+                    channels: resolvedChannels,
                     userId: user.id,
                 } satisfies ConnectedPayload)
             )
-            logger.info({ clientId: id, userId: user.id, channels }, '[connect]')
+            logger.info({ clientId: id, userId: user.id, channels: resolvedChannels }, '[connect]')
 
             // Token expiry
             const msUntilExpiry = user.expiresAt - Date.now()

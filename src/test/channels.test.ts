@@ -7,6 +7,8 @@ import {
     orgChannelRule,
     privateChannelRule,
     publicChannelRule,
+    isWildcard,
+    resolveChannel,
 } from '../channels/rules.ts'
 import type { AuthUser } from '../types.ts'
 
@@ -41,9 +43,24 @@ describe('channel name validation', () => {
         if (!r.allowed) expect(r.status).toBe(403)
     })
 
-    test('rejects names with hyphens', () => {
+    test('allows names with hyphens (UUID-style channel names)', () => {
         const r = engine.check('order-updates', user)
-        expect(r.allowed).toBe(false)
+        expect(r.allowed).toBe(true)
+    })
+
+    test('allows names with colons (namespaced sub-channels)', () => {
+        const r = engine.check('order-updates:status', user)
+        expect(r.allowed).toBe(true)
+    })
+
+    test('allows wildcard subscription pattern (channel:*)', () => {
+        expect(engine.check('orders:*', user).allowed).toBe(true)
+        expect(engine.check('order-updates:*', user).allowed).toBe(true)
+    })
+
+    test('rejects bare asterisk or non-trailing wildcard', () => {
+        expect(engine.check('*', user).allowed).toBe(false)
+        expect(engine.check('orders*', user).allowed).toBe(false)
     })
 
     test('rejects empty string', () => {
@@ -59,16 +76,60 @@ describe('userChannelRule', () => {
         expect(userChannelRule.match('orders')).toBe(false)
     })
 
-    test('allows the owner', () => {
+    test('allows the owner on base channel', () => {
         const user = makeUser({ id: 'abc' })
         expect(userChannelRule.authorize('user_abc', user).allowed).toBe(true)
     })
 
-    test('denies another user', () => {
+    test('allows the owner on sub-channels', () => {
+        const user = makeUser({ id: 'abc' })
+        expect(userChannelRule.authorize('user_abc:session', user).allowed).toBe(true)
+        expect(userChannelRule.authorize('user_abc:payments', user).allowed).toBe(true)
+        expect(userChannelRule.authorize('user_abc:orders', user).allowed).toBe(true)
+    })
+
+    test('denies another user on base channel', () => {
         const user = makeUser({ id: 'xyz' })
         const r = userChannelRule.authorize('user_abc', user)
         expect(r.allowed).toBe(false)
         if (!r.allowed) expect(r.status).toBe(403)
+    })
+
+    test('denies another user on sub-channels', () => {
+        const user = makeUser({ id: 'xyz' })
+        const r = userChannelRule.authorize('user_abc:session', user)
+        expect(r.allowed).toBe(false)
+        if (!r.allowed) expect(r.status).toBe(403)
+    })
+
+    test('wildcard user_abc:* authorizes the owner via rule engine (resolves to user_abc)', () => {
+        const user = makeUser({ id: 'abc' })
+        expect(engine.check('user_abc:*', user).allowed).toBe(true)
+    })
+
+    test('wildcard user_abc:* denies a different user', () => {
+        const user = makeUser({ id: 'xyz' })
+        const r = engine.check('user_abc:*', user)
+        expect(r.allowed).toBe(false)
+    })
+})
+
+// wildcard helpers
+describe('isWildcard / resolveChannel', () => {
+    test('isWildcard detects :* suffix', () => {
+        expect(isWildcard('user_abc:*')).toBe(true)
+        expect(isWildcard('orders:*')).toBe(true)
+        expect(isWildcard('user_abc:session')).toBe(false)
+        expect(isWildcard('user_abc')).toBe(false)
+        expect(isWildcard('orders*')).toBe(false)
+    })
+
+    test('resolveChannel strips :* suffix', () => {
+        expect(resolveChannel('user_abc:*')).toBe('user_abc')
+        expect(resolveChannel('lobby_XYZ:*')).toBe('lobby_XYZ')
+        expect(resolveChannel('orders:*')).toBe('orders')
+        expect(resolveChannel('user_abc:session')).toBe('user_abc:session')
+        expect(resolveChannel('global')).toBe('global')
     })
 })
 

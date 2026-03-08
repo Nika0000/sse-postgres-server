@@ -59,7 +59,7 @@ export async function listenChannel(
                 parsed = rawPayload
             }
 
-            const wire = jsonLine('postgres_notify', {
+            const wire = jsonLine(channel, {
                 channel,
                 payload: parsed,
                 timestamp: new Date().toISOString(),

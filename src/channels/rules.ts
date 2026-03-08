@@ -23,22 +23,48 @@ export type ChannelRule = {
     authorize(channel: string, user: AuthUser): ChannelRuleResult
 }
 
-export const CHANNEL_RE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+export const CHANNEL_RE = /^[a-zA-Z_][a-zA-Z0-9_\-:]*(:\*)?$/
+
+/**
+ * Returns true when `channel` is a wildcard subscription pattern (`foo:*`).
+ * Wildcards subscribe to the base Postgres channel (`foo`) and receive all
+ * notifications on it regardless of their payload `event` field.
+ */
+export function isWildcard(channel: string): boolean {
+    return channel.endsWith(':*')
+}
+
+/**
+ * Strip the trailing `:*` wildcard suffix, returning the concrete Postgres
+ * channel name that should be LISTENed on.
+ *
+ * @example resolveChannel('user_abc:*')     // -> 'user_abc'
+ * @example resolveChannel('user_abc:orders') // -> 'user_abc:orders'
+ * @example resolveChannel('global')          // -> 'global'
+ */
+export function resolveChannel(channel: string): string {
+    return isWildcard(channel) ? channel.slice(0, -2) : channel
+}
 
 
 /**
- * `user_{uuid}` — only the user whose UUID appears in the channel name may
- * subscribe.  This covers personal notification feeds, per-user presence
- * channels, etc.
+ * `user_{uuid}` or `user_{uuid}:{subchannel}` — only the user whose UUID
+ * appears in the channel name may subscribe.  The optional subchannel suffix
+ * (after the first `:`) lets one user have multiple scoped feeds without
+ * needing separate rule entries.
  *
  * @example  user_a1b2c3d4-0000-0000-0000-000000000000
+ * @example  user_a1b2c3d4-0000-0000-0000-000000000000:session
+ * @example  user_a1b2c3d4-0000-0000-0000-000000000000:payments
+ * @example  user_a1b2c3d4-0000-0000-0000-000000000000:orders
  */
 export const userChannelRule: ChannelRule = {
     name: 'user-private',
     match: (channel) => channel.startsWith('user_'),
     authorize(channel, user) {
-        const ownerUuid = channel.slice('user_'.length)
-        if (user.id === ownerUuid) return { allowed: true }
+        // Strip optional :subchannel suffix before comparing
+        const withoutSub = channel.slice('user_'.length).split(':')[0]
+        if (user.id === withoutSub) return { allowed: true }
         return {
             allowed: false,
             reason: `Channel "${channel}" is private — only the owner may subscribe`,
@@ -135,8 +161,11 @@ export class ChannelRuleEngine {
 
     /**
      * Validate the channel name format and check authorisation.
+     * Wildcard channels (`foo:*`) are resolved to their base channel before
+     * both validation and rule matching.
      */
     check(channel: string, user: AuthUser): ChannelRuleResult {
+        const resolved = resolveChannel(channel)
         if (!CHANNEL_RE.test(channel)) {
             return {
                 allowed: false,
@@ -146,8 +175,8 @@ export class ChannelRuleEngine {
         }
 
         for (const rule of this.rules) {
-            if (rule.match(channel)) {
-                return rule.authorize(channel, user)
+            if (rule.match(resolved)) {
+                return rule.authorize(resolved, user)
             }
         }
 
