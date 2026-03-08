@@ -59,7 +59,6 @@ import {
 } from './rules.ts'
 import { teamChannelRule, planChannelRule } from './examples.ts'
 import { denyUnlistedChannels, exactChannel, channelForRole, channelForMetadata } from './helpers.ts'
-import type { AuthUser } from '../types.ts'
 
 type ExactDescriptor = { type: 'exact'; channel: string }
 type RoleGateDescriptor = { type: 'role_gate'; channel: string; role: string }

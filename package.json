@@ -6,7 +6,7 @@
     "scripts": {
         "dev": "bun --watch src/index.ts",
         "start": "bun src/index.ts",
-        "build": "bunx tsc -p tsconfig.json",
+        "build": "bun build src/index.ts --outdir dist --target bun --sourcemap=external",
         "typecheck": "bunx tsc --noEmit",
         "lint": "eslint src --ext .ts",
         "test": "vitest run",
