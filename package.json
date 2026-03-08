@@ -13,7 +13,7 @@
         "test:watch": "vitest"
     },
     "dependencies": {
-        "pino": "^9.7.0",
+        "pino": "^10.3.1",
         "postgres": "^3.4.8"
     },
     "devDependencies": {
