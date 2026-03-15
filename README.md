@@ -52,6 +52,12 @@ curl -N "http://localhost:3000/events?channels=user_<uuid>:*&token=<jwt>"
 # server-to-server — token via header
 curl -N -H "Authorization: Bearer <jwt>" "http://localhost:3000/events?channels=orders"
 
+# dynamically add / remove channels on a live connection (no reconnect)
+curl -X PATCH "http://localhost:3000/events/channels" \
+  -H "Authorization: Bearer <jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"clientId":"<id from connected event>","add":["lobby_ABC123"],"remove":["lobby_XYZ"]}'
+
 # publish from postgres — SSE event name IS the channel name
 psql $DATABASE_URL -c "SELECT pg_notify('orders', '{\"event\":\"created\",\"data\":{\"id\":1}}')"
 
@@ -72,8 +78,23 @@ event: connected
 data: {"id":"<client-uuid>","channels":["orders"],"userId":"<user-uuid>"}
 ```
 
+Special server-sent events:
+
+| SSE `event:` | When | `data` shape |
+|---|---|---|
+| `connected` | Immediately after the stream opens | `{id, channels, userId}` |
+| `channels_updated` | After a successful `PATCH /events/channels` | `{add, remove, channels}` |
+| `token_expired` | JWT expiry | `{reason}` |
+| _(channel name)_ | `pg_notify` fires | `{channel, payload, timestamp}` |
+
 ```js
 const es = new EventSource('/events?channels=orders,user_<uuid>:*&token=<jwt>')
+
+// capture clientId for later PATCH calls
+let clientId
+es.addEventListener('connected', (e) => {
+  clientId = JSON.parse(e.data).id
+})
 
 // named handler per channel
 es.addEventListener('orders', (e) => {
@@ -89,7 +110,36 @@ es.addEventListener(`user_${uid}`, (e) => {
     case 'payment_completed': ...; break
   }
 })
+
+// react to in-band subscription changes
+es.addEventListener('channels_updated', (e) => {
+  const { channels } = JSON.parse(e.data)  // full updated list
+})
 ```
+
+### Dynamic channel subscriptions (`PATCH /events/channels`)
+
+Add or remove channels on a **live SSE connection** without closing the stream.
+All the same channel rules and authorization checks apply to the new channels.
+
+```http
+PATCH /events/channels
+Authorization: Bearer <same JWT used for /events>
+Content-Type: application/json
+
+{
+  "clientId": "<id from the connected event>",
+  "add":    ["lobby_ABC123"],
+  "remove": ["lobby_XYZ999"]
+}
+```
+
+Response `200`:
+```json
+{ "channels": ["user_a1b2-...", "lobby_ABC123"] }
+```
+
+The open SSE stream also receives an in-band `channels_updated` event (see above).
 
 ## Channel rules
 

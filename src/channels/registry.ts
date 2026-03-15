@@ -56,6 +56,35 @@ export function unregisterClient(client: SseClient): void {
 }
 
 /**
+ * Add a single channel to an existing live client.
+ * Caller is responsible for calling `listenChannel` AFTER this.
+ */
+export function addClientChannel(client: SseClient, channel: string): void {
+    client.channels.add(channel)
+    if (!clientsByChannel.has(channel)) clientsByChannel.set(channel, new Set())
+    clientsByChannel.get(channel)!.add(client)
+}
+
+/**
+ * Remove a single channel from an existing live client, UNLISTEN if the
+ * channel becomes empty.
+ */
+export async function removeClientChannel(
+    client: SseClient,
+    channel: string,
+    unlistenFn: (channel: string) => Promise<void>
+): Promise<void> {
+    client.channels.delete(channel)
+    const members = clientsByChannel.get(channel)
+    if (!members) return
+    members.delete(client)
+    if (members.size === 0) {
+        clientsByChannel.delete(channel)
+        await unlistenFn(channel)
+    }
+}
+
+/**
  * Remove a client from every index, UNLISTEN any channel that is now empty,
  * and close its stream.  Safe to call multiple times — idempotent via
  * `clientsById` membership check.

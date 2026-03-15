@@ -17,8 +17,8 @@ export type AuthUser = {
  */
 export type SseClient = {
     readonly id: string
-    /** All channels this connection is currently subscribed to. */
-    readonly channels: ReadonlySet<string>
+    /** All channels this connection is currently subscribed to (mutable: PATCH /events/channels). */
+    readonly channels: Set<string>
     readonly user: AuthUser
     alive: boolean
     send: (chunk: string) => boolean
@@ -45,6 +45,12 @@ export type ConnectedPayload = {
 
 export type TokenExpiredPayload = {
     readonly reason: string
+}
+
+export type ChannelsUpdatedPayload = {
+    readonly add: readonly string[]
+    readonly remove: readonly string[]
+    readonly channels: readonly string[]
 }
 
 export type HealthResponse = {
