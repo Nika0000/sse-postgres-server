@@ -4,6 +4,7 @@ import { listenHandles, pendingListens, clientsByChannel } from './registry.ts'
 import type { SseClient, NotifyPayload } from '../types.ts'
 import { logger } from '../logger.ts'
 import { removeClient } from './registry.ts'
+import { pushEvent } from './buffer.ts'
 
 // Database connection
 //
@@ -59,11 +60,17 @@ export async function listenChannel(
                 parsed = rawPayload
             }
 
-            const wire = jsonLine(channel, {
+            const data: NotifyPayload = {
                 channel,
                 payload: parsed,
                 timestamp: new Date().toISOString(),
-            } satisfies NotifyPayload)
+            }
+
+            const eventId = config.eventBufferSize > 0
+                ? pushEvent(channel, JSON.stringify(data), config)
+                : undefined
+
+            const wire = jsonLineWithId(channel, data, eventId)
 
             // Fan-out; collect broken clients for async cleanup.
             const dead: SseClient[] = []
@@ -103,6 +110,11 @@ export async function unlistenChannel(
 
 export function jsonLine(event: string, payload: unknown): string {
     return `event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
+}
+
+export function jsonLineWithId(event: string, payload: unknown, id?: number): string {
+    if (id === undefined) return jsonLine(event, payload)
+    return `id: ${id}\nevent: ${event}\ndata: ${JSON.stringify(payload)}\n\n`
 }
 
 export function makeDeadClientHandler(config: Config) {

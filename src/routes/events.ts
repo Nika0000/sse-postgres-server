@@ -14,11 +14,13 @@ import {
     listenChannel,
     unlistenChannel,
     jsonLine,
+    jsonLineWithId,
     makeDeadClientHandler,
 } from '../channels/db.ts'
+import { getEventsSince } from '../channels/buffer.ts'
 import { checkRateLimit } from '../rateLimit.ts'
 import { logger } from '../logger.ts'
-import type { SseClient, ConnectedPayload, TokenExpiredPayload } from '../types.ts'
+import type { SseClient, ConnectedPayload, TokenExpiredPayload, DrainPayload } from '../types.ts'
 
 export async function handleEvents(
     request: Request,
@@ -105,6 +107,11 @@ export async function handleEvents(
         )
     }
 
+    // Reconnection: parse Last-Event-ID header
+    const lastEventIdRaw = request.headers.get('Last-Event-ID')
+    const lastEventId = lastEventIdRaw ? parseInt(lastEventIdRaw, 10) : null
+    const isReconnect = lastEventId !== null && !isNaN(lastEventId)
+
     // Build SSE stream
     const onDead = makeDeadClientHandler(config)
 
@@ -167,7 +174,26 @@ export async function handleEvents(
                     userId: user.id,
                 } satisfies ConnectedPayload)
             )
-            logger.info({ clientId: id, userId: user.id, channels: resolvedChannels }, '[connect]')
+
+            // Replay buffered events on reconnect, then send drain event
+            if (isReconnect && config.eventBufferSize > 0) {
+                const missed = getEventsSince(resolvedChannels, lastEventId, config)
+                for (const event of missed) {
+                    client.send(jsonLineWithId(event.channel, JSON.parse(event.data), event.id))
+                }
+                client.send(
+                    jsonLine('drain', {
+                        count: missed.length,
+                        lastId: missed.length > 0 ? missed[missed.length - 1].id : lastEventId,
+                    } satisfies DrainPayload)
+                )
+                logger.info(
+                    { clientId: id, userId: user.id, replayed: missed.length, lastEventId },
+                    '[reconnect]'
+                )
+            } else {
+                logger.info({ clientId: id, userId: user.id, channels: resolvedChannels }, '[connect]')
+            }
 
             // Token expiry
             const msUntilExpiry = user.expiresAt - Date.now()
