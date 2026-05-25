@@ -51,6 +51,6 @@ export function loadConfig(): Config {
         maxTotalConnections: Number(optionalEnv('MAX_TOTAL_CONNECTIONS', '1000')),
         rateLimitPerMinute: Number(optionalEnv('RATE_LIMIT_PER_MINUTE', '30')),
         eventBufferSize: Number(optionalEnv('EVENT_BUFFER_SIZE', '100')),
-        eventBufferTtlMs: Number(optionalEnv('EVENT_BUFFER_TTL_MS', '300000')),
+        eventBufferTtlMs: Number(optionalEnv('EVENT_BUFFER_TTL_MS', '30000')),
     }
 }
