@@ -2,8 +2,8 @@ export type Config = {
     readonly port: number
     readonly databaseUrl: string
     readonly heartbeatMs: number
-    /** Required — every /events request must carry a valid Supabase JWT. */
-    readonly jwtSecret: string
+    /** JWKS endpoint URL for JWT public key discovery (e.g. https://example.supabase.co/auth/v1/.well-known/jwks.json) */
+    readonly jwksUrl: string
     /**
      * When set, the JWT `aud` claim must equal this value.
      * Leave unset to skip audience validation.
@@ -19,6 +19,10 @@ export type Config = {
     readonly maxTotalConnections: number
     /** Maximum /events requests accepted per IP per minute (sliding window). */
     readonly rateLimitPerMinute: number
+    /** Max events to buffer per channel for reconnection replay. 0 disables. */
+    readonly eventBufferSize: number
+    /** How long buffered events remain replayable (ms). */
+    readonly eventBufferTtlMs: number
 }
 
 function requireEnv(key: string): string {
@@ -39,12 +43,14 @@ export function loadConfig(): Config {
         port: Number(optionalEnv('PORT', '3000')),
         databaseUrl: requireEnv('DATABASE_URL'),
         heartbeatMs: Number(optionalEnv('SSE_HEARTBEAT_MS', '15000')),
-        jwtSecret: requireEnv('SUPABASE_JWT_SECRET'),
-        jwtAudience: process.env.SUPABASE_JWT_AUDIENCE ?? null,
+        jwksUrl: requireEnv('JWKS_URL'),
+        jwtAudience: process.env.JWT_AUDIENCE ?? null,
         corsOrigin: optionalEnv('CORS_ORIGIN', '*'),
         maxChannels: Number(optionalEnv('MAX_CHANNELS_PER_CONNECTION', '10')),
         maxConnectionsPerUser: Number(optionalEnv('MAX_CONNECTIONS_PER_USER', '10')),
         maxTotalConnections: Number(optionalEnv('MAX_TOTAL_CONNECTIONS', '1000')),
         rateLimitPerMinute: Number(optionalEnv('RATE_LIMIT_PER_MINUTE', '30')),
+        eventBufferSize: Number(optionalEnv('EVENT_BUFFER_SIZE', '100')),
+        eventBufferTtlMs: Number(optionalEnv('EVENT_BUFFER_TTL_MS', '300000')),
     }
 }

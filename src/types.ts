@@ -53,6 +53,11 @@ export type ChannelsUpdatedPayload = {
     readonly channels: readonly string[]
 }
 
+export type DrainPayload = {
+    readonly count: number
+    readonly lastId: number
+}
+
 export type HealthResponse = {
     readonly ok: boolean
     readonly clients: number

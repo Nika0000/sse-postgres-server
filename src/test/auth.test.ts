@@ -1,46 +1,82 @@
-import { describe, test, expect } from 'vitest'
-import { verifyJwt, extractToken } from '../auth.ts'
+import { describe, test, expect, beforeAll, afterAll, afterEach } from 'vitest'
+import { verifyJwt, extractToken, initJwks, _resetKeyCache } from '../auth.ts'
 import type { Config } from '../config.ts'
+import { serve } from 'bun'
 
-const SECRET = 'super-secret-jwt-key-for-tests-only'
+let keyPair: CryptoKeyPair
+let jwkPublic: JsonWebKey
+let jwksServer: ReturnType<typeof serve>
+let jwksUrl: string
 
-const BASE_CONFIG: Config = {
-    port: 3000,
-    databaseUrl: 'postgres://localhost/test',
-    heartbeatMs: 15_000,
-    jwtSecret: SECRET,
-    jwtAudience: null,
-    corsOrigin: '*',
-    maxChannels: 10,
-    maxConnectionsPerUser: 10,
-    maxTotalConnections: 1000,
-    rateLimitPerMinute: 30,
+const KID = 'test-key-1'
+
+let BASE_CONFIG: Config
+
+beforeAll(async () => {
+    keyPair = await crypto.subtle.generateKey(
+        { name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' },
+        true,
+        ['sign', 'verify']
+    )
+    jwkPublic = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
+
+    jwksServer = serve({
+        port: 0,
+        fetch() {
+            return new Response(
+                JSON.stringify({
+                    keys: [{ ...jwkPublic, kid: KID, alg: 'RS256', use: 'sig' }],
+                }),
+                { headers: { 'Content-Type': 'application/json' } }
+            )
+        },
+    })
+
+    jwksUrl = `http://localhost:${jwksServer.port}/.well-known/jwks.json`
+    BASE_CONFIG = {
+        port: 3000,
+        databaseUrl: 'postgres://localhost/test',
+        heartbeatMs: 15_000,
+        jwksUrl,
+        jwtAudience: null,
+        corsOrigin: '*',
+        maxChannels: 10,
+        maxConnectionsPerUser: 10,
+        maxTotalConnections: 1000,
+        rateLimitPerMinute: 30,
+        eventBufferSize: 100,
+        eventBufferTtlMs: 300_000,
+    }
+    await initJwks(BASE_CONFIG)
+})
+
+afterAll(() => {
+    jwksServer?.stop()
+})
+
+afterEach(() => {
+    _resetKeyCache()
+})
+
+function b64url(data: Uint8Array | string): string {
+    const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data
+    return btoa(String.fromCharCode(...bytes))
+        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
 }
 
 async function buildToken(
     claims: Record<string, unknown>,
-    secret = SECRET
+    kid = KID
 ): Promise<string> {
-    const header = btoa(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
-        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-    const payload = btoa(JSON.stringify(claims))
-        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
+    const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT', kid }))
+    const payload = b64url(JSON.stringify(claims))
 
-    const key = await crypto.subtle.importKey(
-        'raw',
-        new TextEncoder().encode(secret),
-        { name: 'HMAC', hash: 'SHA-256' },
-        false,
-        ['sign']
-    )
     const sig = await crypto.subtle.sign(
-        'HMAC',
-        key,
+        'RSASSA-PKCS1-v1_5',
+        keyPair.privateKey,
         new TextEncoder().encode(`${header}.${payload}`)
     )
-    const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig)))
-        .replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_')
-
+    const sigB64 = b64url(new Uint8Array(sig))
     return `${header}.${payload}.${sigB64}`
 }
 
@@ -48,9 +84,9 @@ function nowSecs(): number {
     return Math.floor(Date.now() / 1000)
 }
 
-// verifyJwt
-describe('verifyJwt', () => {
+describe('verifyJwt (JWKS)', () => {
     test('returns user for a valid token', async () => {
+        await initJwks(BASE_CONFIG)
         const token = await buildToken({
             sub: 'user-uuid',
             email: 'a@b.com',
@@ -67,11 +103,13 @@ describe('verifyJwt', () => {
     })
 
     test('returns null for a malformed token', async () => {
+        await initJwks(BASE_CONFIG)
         expect(await verifyJwt('not.a.jwt', BASE_CONFIG)).toBeNull()
         expect(await verifyJwt('only-one-part', BASE_CONFIG)).toBeNull()
     })
 
     test('returns null for an expired token', async () => {
+        await initJwks(BASE_CONFIG)
         const token = await buildToken({
             sub: 'u',
             role: 'authenticated',
@@ -82,15 +120,32 @@ describe('verifyJwt', () => {
         expect(await verifyJwt(token, BASE_CONFIG)).toBeNull()
     })
 
-    test('returns null when signature is wrong', async () => {
+    test('returns null for unknown kid', async () => {
+        await initJwks(BASE_CONFIG)
         const token = await buildToken(
             { sub: 'u', role: 'authenticated', aud: 'authenticated', exp: nowSecs() + 3600, iat: nowSecs() },
-            'wrong-secret'
+            'nonexistent-kid'
         )
         expect(await verifyJwt(token, BASE_CONFIG)).toBeNull()
     })
 
+    test('returns null when kid is missing from header', async () => {
+        await initJwks(BASE_CONFIG)
+        const header = b64url(JSON.stringify({ alg: 'RS256', typ: 'JWT' }))
+        const payload = b64url(JSON.stringify({
+            sub: 'u', role: 'authenticated', exp: nowSecs() + 3600, iat: nowSecs(),
+        }))
+        const sig = await crypto.subtle.sign(
+            'RSASSA-PKCS1-v1_5',
+            keyPair.privateKey,
+            new TextEncoder().encode(`${header}.${payload}`)
+        )
+        const token = `${header}.${payload}.${b64url(new Uint8Array(sig))}`
+        expect(await verifyJwt(token, BASE_CONFIG)).toBeNull()
+    })
+
     test('validates audience when configured', async () => {
+        await initJwks(BASE_CONFIG)
         const token = await buildToken({
             sub: 'u',
             role: 'authenticated',
@@ -106,6 +161,7 @@ describe('verifyJwt', () => {
     })
 
     test('maps app_metadata and user_metadata', async () => {
+        await initJwks(BASE_CONFIG)
         const token = await buildToken({
             sub: 'u',
             role: 'authenticated',
@@ -119,9 +175,20 @@ describe('verifyJwt', () => {
         expect(user?.appMetadata).toEqual({ org_id: 'acme' })
         expect(user?.userMetadata).toEqual({ theme: 'dark' })
     })
+
+    test('defaults role to authenticated when claim is missing', async () => {
+        await initJwks(BASE_CONFIG)
+        const token = await buildToken({
+            sub: 'u',
+            aud: 'authenticated',
+            exp: nowSecs() + 3600,
+            iat: nowSecs(),
+        })
+        const user = await verifyJwt(token, BASE_CONFIG)
+        expect(user?.role).toBe('authenticated')
+    })
 })
 
-// extractToken
 describe('extractToken', () => {
     test('reads from Authorization header', () => {
         const req = new Request('http://localhost/events', {

@@ -9,7 +9,7 @@ export function handleHealth(config: Config, cors: Record<string, string>): Resp
             clients: totalClients(),
             channels: clientsByChannel.size,
             uptime: Math.floor(process.uptime()),
-            auth: !!config.jwtSecret,
+            auth: !!config.jwksUrl,
         } satisfies HealthResponse,
         { headers: cors }
     )
