@@ -190,44 +190,6 @@ Rules run top-to-bottom — first match wins.
 
 > Channel names may contain letters, digits, underscores `_`, hyphens `-`, and colons `:`. They must start with a letter or underscore. Hyphens allow UUID-style names (`user_1b8f4c33-…`). Colons enable sub-channels and wildcards.
 
-### Configure without rebuilding (`CHANNEL_RULES`)
-
-Set `CHANNEL_RULES` as a JSON array to control access entirely from your environment — no code changes, no image rebuild needed.
-
-```bash
-CHANNEL_RULES='[
-  { "type": "exact",     "channel": "announcements" },
-  { "type": "exact",     "channel": "global"        },
-  { "type": "role_gate", "channel": "admin_events",  "role": "admin"      },
-  { "type": "meta_gate", "channel": "beta",          "key": "beta",  "value": true  },
-  { "type": "meta_gate", "channel": "pro_feed",      "key": "plan",  "value": "pro" },
-  { "type": "prefix_meta", "prefix": "lobby_", "key": "lobby_id" },
-  { "type": "team_prefix"    },
-  { "type": "user_prefix"    },
-  { "type": "role_prefix"    },
-  { "type": "org_prefix"     },
-  { "type": "private_prefix" },
-  { "type": "deny_unlisted"  }
-]'
-```
-
-| Rule type | Description |
-|---|---|
-| `exact` | Named channel, open to any authenticated user |
-| `role_gate` | Named channel, JWT role must match |
-| `meta_gate` | Named channel, `app_metadata[key] === value` |
-| `prefix_meta` | `{prefix}{id}` — `app_metadata[key]` must equal the suffix; works for any prefix with no code changes |
-| `team_prefix` | `team_{id}` — needs `app_metadata.team_id` |
-| `plan_prefix` | `plan_{tier}` — tiered gate (`free` -> `starter` -> `pro` -> `enterprise`) |
-| `user_prefix` | `user_{uuid}` — owner-only (also covers `user_{uuid}:{sub}` and `user_{uuid}:*`) |
-| `role_prefix` | `role_{name}` — JWT role must match suffix |
-| `org_prefix` | `org_{id}` — `app_metadata.org_id` must match |
-| `private_prefix` | `private_*` — any non-anon user |
-| `public` | Catch-all allow |
-| `deny_unlisted` | Catch-all deny (strict allowlist) |
-
-If `CHANNEL_RULES` is not set, the programmatic config in `src/channels/config.ts` is used instead.
-
 ### Postgres trigger (push events automatically)
 
 ```sql
