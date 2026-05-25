@@ -1,11 +1,11 @@
 import { describe, test, expect, beforeAll, afterAll, afterEach } from 'vitest'
 import { verifyJwt, extractToken, initJwks, _resetKeyCache } from '../auth.ts'
 import type { Config } from '../config.ts'
-import { serve } from 'bun'
+import { createServer, type Server } from 'node:http'
 
 let keyPair: CryptoKeyPair
 let jwkPublic: JsonWebKey
-let jwksServer: ReturnType<typeof serve>
+let jwksServer: Server
 let jwksUrl: string
 
 const KID = 'test-key-1'
@@ -20,19 +20,16 @@ beforeAll(async () => {
     )
     jwkPublic = await crypto.subtle.exportKey('jwk', keyPair.publicKey)
 
-    jwksServer = serve({
-        port: 0,
-        fetch() {
-            return new Response(
-                JSON.stringify({
-                    keys: [{ ...jwkPublic, kid: KID, alg: 'RS256', use: 'sig' }],
-                }),
-                { headers: { 'Content-Type': 'application/json' } }
-            )
-        },
+    jwksServer = createServer((req, res) => {
+        res.setHeader('Content-Type', 'application/json')
+        res.end(JSON.stringify({
+            keys: [{ ...jwkPublic, kid: KID, alg: 'RS256', use: 'sig' }],
+        }))
     })
+    await new Promise<void>((resolve) => jwksServer.listen(0, resolve))
+    const addr = jwksServer.address() as { port: number }
 
-    jwksUrl = `http://localhost:${jwksServer.port}/.well-known/jwks.json`
+    jwksUrl = `http://localhost:${addr.port}/.well-known/jwks.json`
     BASE_CONFIG = {
         port: 3000,
         databaseUrl: 'postgres://localhost/test',
@@ -51,7 +48,7 @@ beforeAll(async () => {
 })
 
 afterAll(() => {
-    jwksServer?.stop()
+    jwksServer?.close()
 })
 
 afterEach(() => {
