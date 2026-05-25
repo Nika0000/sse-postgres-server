@@ -23,8 +23,7 @@
 
 import type { Config } from '../config.ts'
 import { verifyJwt, extractToken } from '../auth.ts'
-import type { ChannelRuleEngine } from '../channels/rules.ts'
-import { resolveChannel } from '../channels/rules.ts'
+import { resolveChannel } from '../channels/validate.ts'
 import { clientsById, addClientChannel, removeClientChannel } from '../channels/registry.ts'
 import { listenChannel, unlistenChannel, jsonLine, makeDeadClientHandler } from '../channels/db.ts'
 import { logger } from '../logger.ts'
@@ -35,7 +34,6 @@ export async function handleChannelUpdate(
     url: URL,
     cors: Record<string, string>,
     config: Config,
-    engine: ChannelRuleEngine
 ): Promise<Response> {
     const token = extractToken(request, url)
     if (!token) {
@@ -83,15 +81,6 @@ export async function handleChannelUpdate(
         })
     }
 
-    if (addList.length > 0) {
-        const denial = engine.checkAll(addList, user)
-        if (denial) {
-            return new Response(denial.result.reason, {
-                status: denial.result.status,
-                headers: cors,
-            })
-        }
-    }
 
     // Resolve wildcards + skip channels already subscribed / already absent.
     const resolvedAdd = [...new Set(addList.map(resolveChannel))].filter(

@@ -5,12 +5,8 @@ import { initJwks } from './auth.ts'
 import { startRateLimitPurge } from './rateLimit.ts'
 import { purgeExpired } from './channels/buffer.ts'
 import { logger } from './logger.ts'
-import { ruleEngine } from './channels/config.ts'
-import { engineFromEnv } from './channels/env-rules.ts'
 
 const config = loadConfig()
-
-const engine = engineFromEnv() ?? ruleEngine
 
 // Eagerly verify the DB connection so a bad DATABASE_URL fails at startup.
 checkConnection(config)
@@ -34,6 +30,6 @@ startRateLimitPurge().unref()
 // Purge expired events from the reconnection buffer every 60s.
 setInterval(() => purgeExpired(config), 60_000).unref()
 
-const server = createServer(config, engine)
+const server = createServer(config)
 logger.info(`SSE server on http://localhost:${server.port}`)
 

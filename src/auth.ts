@@ -31,8 +31,6 @@ type JwtClaims = {
     readonly aud?: string | string[]
     readonly exp: number
     readonly iat: number
-    readonly app_metadata?: Record<string, unknown>
-    readonly user_metadata?: Record<string, unknown>
 }
 
 const ALG_PARAMS: Record<string, { import: AlgorithmIdentifier | RsaHashedImportParams | EcKeyImportParams; verify: AlgorithmIdentifier | RsaPssParams | EcdsaParams }> = {
@@ -168,8 +166,6 @@ export async function verifyJwt(
             id: claims.sub,
             email: claims.email ?? null,
             role: claims.role ?? 'authenticated',
-            appMetadata: claims.app_metadata ?? {},
-            userMetadata: claims.user_metadata ?? {},
             expiresAt: claims.exp * 1000,
         }
     } catch {

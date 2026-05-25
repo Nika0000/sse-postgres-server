@@ -160,22 +160,6 @@ describe('verifyJwt (JWKS)', () => {
         expect(await verifyJwt(token, wrongAud)).toBeNull()
     })
 
-    test('maps app_metadata and user_metadata', async () => {
-        await initJwks(BASE_CONFIG)
-        const token = await buildToken({
-            sub: 'u',
-            role: 'authenticated',
-            aud: 'authenticated',
-            exp: nowSecs() + 3600,
-            iat: nowSecs(),
-            app_metadata: { org_id: 'acme' },
-            user_metadata: { theme: 'dark' },
-        })
-        const user = await verifyJwt(token, BASE_CONFIG)
-        expect(user?.appMetadata).toEqual({ org_id: 'acme' })
-        expect(user?.userMetadata).toEqual({ theme: 'dark' })
-    })
-
     test('defaults role to authenticated when claim is missing', async () => {
         await initJwks(BASE_CONFIG)
         const token = await buildToken({

@@ -1,7 +1,6 @@
 import type { Config } from '../config.ts'
 import { verifyJwt, extractToken } from '../auth.ts'
-import type { ChannelRuleEngine } from '../channels/rules.ts'
-import { resolveChannel } from '../channels/rules.ts'
+import { resolveChannel } from '../channels/validate.ts'
 import {
     clientsById,
     connectionCountByUser,
@@ -28,7 +27,6 @@ export async function handleEvents(
     cors: Record<string, string>,
     config: Config,
     server: { requestIP(req: Request): { address: string } | null },
-    engine: ChannelRuleEngine
 ): Promise<Response> {
     // Rate limit
     const remoteIp = server.requestIP(request)?.address ?? 'unknown'
@@ -78,15 +76,6 @@ export async function handleEvents(
 
     // Deduplicate while preserving order.
     const channels = [...new Set(rawChannels)]
-
-    // Channel rules
-    const denial = engine.checkAll(channels, user)
-    if (denial) {
-        return new Response(denial.result.reason, {
-            status: denial.result.status,
-            headers: cors,
-        })
-    }
 
     // Resolve wildcard patterns (e.g. user_abc:* -> user_abc) for LISTEN.
     // Dedup again in case two wildcards collapse to the same base channel.
@@ -165,7 +154,6 @@ export async function handleEvents(
                 return
             }
 
-            // Instruct the browser to reconnect after 5 s on disconnect.
             client.send('retry: 5000\n')
             client.send(
                 jsonLine('connected', {

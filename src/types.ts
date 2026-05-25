@@ -4,8 +4,6 @@ export type AuthUser = {
     readonly id: string
     readonly email: string | null
     readonly role: string
-    readonly appMetadata: Record<string, unknown>
-    readonly userMetadata: Record<string, unknown>
     /** Unix epoch ms — when the JWT expires. Used to close the stream at expiry. */
     readonly expiresAt: number
 }

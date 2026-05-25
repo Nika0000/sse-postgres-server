@@ -1,5 +1,4 @@
 import type { Config } from './config.ts'
-import type { ChannelRuleEngine } from './channels/rules.ts'
 import { handleHealth } from './routes/health.ts'
 import { handleEvents } from './routes/events.ts'
 import { handleChannelUpdate } from './routes/channels.ts'
@@ -24,7 +23,6 @@ function corsHeaders(config: Config, requestOrigin: string | null): Record<strin
  */
 export function createServer(
     config: Config,
-    engine: ChannelRuleEngine
 ): ReturnType<typeof Bun.serve> {
     const server = Bun.serve({
         port: config.port,
@@ -45,11 +43,11 @@ export function createServer(
             }
 
             if (request.method === 'GET' && url.pathname === '/events') {
-                return handleEvents(request, url, cors, config, server, engine)
+                return handleEvents(request, url, cors, config, server)
             }
 
             if (request.method === 'PATCH' && url.pathname === '/events/channels') {
-                return handleChannelUpdate(request, url, cors, config, engine)
+                return handleChannelUpdate(request, url, cors, config)
             }
 
             if (url.pathname !== '/events' && url.pathname !== '/health' && url.pathname !== '/events/channels') {
