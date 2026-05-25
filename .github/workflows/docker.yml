@@ -2,8 +2,8 @@ name: Publish Docker Image
 
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 jobs:
@@ -20,40 +20,13 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
-      # Format: YYYY.MM.DD.HHmm  (UTC, zero-padded, sortable)
-      - name: Generate version
+      - name: Extract version from tag
         id: version
         run: |
-          VERSION=$(date -u +"%Y.%m.%d.%H%M")
+          VERSION="${GITHUB_REF_NAME#v}"
           echo "value=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Generated version: $VERSION"
-
-      # ── Bump package.json ────────────────────────────────────────────────────
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      - name: Write version to package.json
-        run: |
-          bun -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.version = '${{ steps.version.outputs.value }}';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 4) + '\n');
-          "
-
-      - name: Commit version bump
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add package.json
-          git commit -m "chore: bump version to ${{ steps.version.outputs.value }} [skip ci]"
-          git push
+          echo "Version: $VERSION"
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v4
@@ -95,8 +68,8 @@ jobs:
         with:
           images: ${{ steps.images.outputs.list }}
           tags: |
-            type=raw,value=${{ steps.version.outputs.value }}
-            type=raw,value={{ date 'YYYY.MM.DD' tz='UTC' }}
+            type=semver,pattern={{version}},value=${{ steps.version.outputs.value }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.value }}
             type=raw,value=latest
             type=sha,prefix=sha-,format=short
 
