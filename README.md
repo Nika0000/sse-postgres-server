@@ -6,7 +6,7 @@
 [![Bun](https://img.shields.io/badge/runtime-bun-fbf0df?logo=bun)](https://bun.sh)
 [![License](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
 
-PostgreSQL `LISTEN/NOTIFY` -> HTTP SSE bridge. JWT-authenticated, rate-limited, zero runtime dependencies outside of Bun + postgres driver.
+PostgreSQL `LISTEN/NOTIFY` -> HTTP SSE bridge. JWT-authenticated (via JWKS), rate-limited, with automatic reconnection and event replay. Zero runtime dependencies outside of Bun + postgres driver.
 
 ---
 
@@ -14,7 +14,7 @@ PostgreSQL `LISTEN/NOTIFY` -> HTTP SSE bridge. JWT-authenticated, rate-limited, 
 
 ```bash
 bun install
-cp .env.example .env   # fill in DATABASE_URL + SUPABASE_JWT_SECRET
+cp .env.example .env   # fill in DATABASE_URL + JWKS_URL
 bun run dev
 ```
 
@@ -23,16 +23,18 @@ bun run dev
 | Variable | Required | Default | Description |
 |---|---|---|---|
 | `DATABASE_URL` | &check; | — | postgres connection string |
-| `SUPABASE_JWT_SECRET` | &check; | — | JWT signing secret |
+| `JWKS_URL` | &check; | — | JWKS endpoint for JWT public key discovery (e.g. `https://<ref>.supabase.co/auth/v1/.well-known/jwks.json`) |
 | `CHANNEL_RULES` | &cross; | see below | JSON channel access rules |
 | `PORT` | &cross; | `3000` | HTTP listen port |
-| `SUPABASE_JWT_AUDIENCE` | &cross; | — | Validates the `aud` claim |
+| `JWT_AUDIENCE` | &cross; | — | Validates the `aud` claim |
 | `CORS_ORIGIN` | &cross; | `*` | Allowed origin or `*` |
 | `SSE_HEARTBEAT_MS` | &cross; | `15000` | Keepalive interval |
 | `MAX_CHANNELS_PER_CONNECTION` | &cross; | `10` | Channels per SSE connection |
 | `MAX_CONNECTIONS_PER_USER` | &cross; | `10` | Concurrent connections per user |
 | `MAX_TOTAL_CONNECTIONS` | &cross; | `1000` | Server-wide connection cap |
 | `RATE_LIMIT_PER_MINUTE` | &cross; | `30` | Requests/min per IP |
+| `EVENT_BUFFER_SIZE` | &cross; | `100` | Max events buffered per channel for reconnection replay (0 disables) |
+| `EVENT_BUFFER_TTL_MS` | &cross; | `300000` | How long buffered events remain replayable (ms) |
 
 ## Usage
 
@@ -83,6 +85,7 @@ Special server-sent events:
 | SSE `event:` | When | `data` shape |
 |---|---|---|
 | `connected` | Immediately after the stream opens | `{id, channels, userId}` |
+| `drain` | After replaying missed events on reconnect | `{count, lastId}` |
 | `channels_updated` | After a successful `PATCH /events/channels` | `{add, remove, channels}` |
 | `token_expired` | JWT expiry | `{reason}` |
 | _(channel name)_ | `pg_notify` fires | `{channel, payload, timestamp}` |
@@ -111,11 +114,41 @@ es.addEventListener(`user_${uid}`, (e) => {
   }
 })
 
+// reconnection: drain event fires after missed events are replayed
+es.addEventListener('drain', (e) => {
+  const { count, lastId } = JSON.parse(e.data)
+  console.log(`Reconnected — replayed ${count} missed events (up to id ${lastId})`)
+})
+
 // react to in-band subscription changes
 es.addEventListener('channels_updated', (e) => {
   const { channels } = JSON.parse(e.data)  // full updated list
 })
 ```
+
+### Reconnection & event replay
+
+The server buffers recent events per channel (configurable via `EVENT_BUFFER_SIZE` and `EVENT_BUFFER_TTL_MS`). When a client reconnects, the browser's `EventSource` automatically sends the `Last-Event-ID` header with the last received event ID.
+
+On reconnect the server:
+1. Sends the `connected` event (new client ID)
+2. Replays all buffered events since `Last-Event-ID` (each with its original `id:` field)
+3. Sends a `drain` event signaling that catch-up is complete and live streaming resumes
+
+```
+id: 42
+event: orders
+data: {"channel":"orders","payload":{"event":"created","data":{"id":5}},"timestamp":"..."}
+
+id: 43
+event: orders
+data: {"channel":"orders","payload":{"event":"created","data":{"id":6}},"timestamp":"..."}
+
+event: drain
+data: {"count":2,"lastId":43}
+```
+
+> Events older than `EVENT_BUFFER_TTL_MS` (default 5 minutes) or beyond `EVENT_BUFFER_SIZE` (default 100 per channel) are discarded. If the gap is too large, the client should perform a full state sync.
 
 ### Dynamic channel subscriptions (`PATCH /events/channels`)
 
